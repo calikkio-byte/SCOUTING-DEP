@@ -2,7 +2,10 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0F172A">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
     <title>SCOUTING DEPARTMENT - Player Report & Database</title>
     <!-- Google Fonts: Montserrat -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -283,7 +286,7 @@
                         <button onclick="setFilter('grade', 'C')" data-grade="C" class="grade-pill px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-700">C</button>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 gap-2 md:col-span-6">
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 md:col-span-6">
                     <div>
                         <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Anno Nascita</label>
                         <select id="filter-year" onchange="renderArchive()" class="w-full py-2 px-3 bg-surface border border-slate-200 rounded-xl text-xs font-bold text-navy focus:outline-none focus:border-crimson">
@@ -297,6 +300,17 @@
                             <option value="2026">Entro 2026</option>
                             <option value="2027">2027</option>
                             <option value="2028">2028+</option>
+                        </select>
+                    </div>
+                    <div class="col-span-2 sm:col-span-1">
+                        <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Ordina per</label>
+                        <select id="filter-sort" onchange="renderArchive()" class="w-full py-2 px-3 bg-surface border border-slate-200 rounded-xl text-xs font-bold text-navy focus:outline-none focus:border-crimson">
+                            <option value="recent">Ordine di inserimento</option>
+                            <option value="name">Nome A-Z</option>
+                            <option value="grade">Grado valutazione</option>
+                            <option value="avg">Media voti</option>
+                            <option value="age">Più giovani prima</option>
+                            <option value="contract">Scadenza contratto</option>
                         </select>
                     </div>
                 </div>
@@ -608,6 +622,7 @@
                     </div>
                 </div>
                 <div id="availability-progress-bar" class="w-full h-3 rounded-full overflow-hidden flex bg-slate-200"></div>
+                <p id="availability-total" class="text-[11px] font-semibold mt-1.5"></p>
             </div>
 
             <!-- Injuries Table + Interactive Anatomical Silhouette -->
@@ -1241,6 +1256,92 @@
         // -------------------------------------------------------------------
         // 3. INITIALIZATION & STORAGE
         // -------------------------------------------------------------------
+        // -------------------------------------------------------------------
+        // HELPERS: escape HTML, normalizzazione dati, stagione corrente
+        // -------------------------------------------------------------------
+        function esc(v) {
+            return String(v === undefined || v === null ? '' : v)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function escapeDeep(v) {
+            if (typeof v === 'string') return esc(v);
+            if (Array.isArray(v)) return v.map(escapeDeep);
+            if (v && typeof v === 'object') {
+                const o = {};
+                Object.keys(v).forEach(k => { o[k] = escapeDeep(v[k]); });
+                return o;
+            }
+            return v;
+        }
+
+        function currentSeason() {
+            const now = new Date();
+            const y = now.getFullYear();
+            return now.getMonth() >= 6 ? `${y}/${y + 1}` : `${y - 1}/${y}`;
+        }
+
+        function todayIT() {
+            return new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
+
+        function normalizePlayer(p) {
+            const defaults = {
+                number: '', club: '', league: '', roleCategory: 'Centrocampista', role: '', roleSecondary: '',
+                rolePercentages: '', dob: '', birthplace: '', nationality: '', nationality2: '', height: '', weight: '',
+                foot: 'Destro', contract: '', value: '', photo: '', tacticalDescription: '', categoryDistribution: '',
+                careerNotes: '', fitnessEvaluation: '', competitiveLevel: '', finalVerdict: '', finalGrade: 'B'
+            };
+            Object.keys(defaults).forEach(k => {
+                if (p[k] === undefined || p[k] === null) p[k] = defaults[k];
+            });
+            if (typeof p.name !== 'string') p.name = 'Senza Nome';
+            if (typeof p.finalGrade !== 'string') p.finalGrade = 'B';
+            p.id = p.id ? String(p.id).replace(/[^A-Za-z0-9_-]/g, '_') : 'player-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+            p.pitchZones = p.pitchZones || {};
+            if (!Array.isArray(p.pitchZones.primary)) p.pitchZones.primary = [];
+            if (!Array.isArray(p.pitchZones.secondary)) p.pitchZones.secondary = [];
+            ['career', 'injuries', 'advancedMetrics', 'strengths', 'weaknesses'].forEach(k => {
+                if (!Array.isArray(p[k])) p[k] = [];
+            });
+            p.availability = Object.assign({ available: 90, injured: 5, suspended: 0, bench: 5 }, p.availability || {});
+            p.extraField = Object.assign({ family: '', education: '', lifestyle: '', social: '' }, p.extraField || {});
+            p.categorySummaries = Object.assign({ physical: '', technical: '', mental: '', tactical: '' }, p.categorySummaries || {});
+            p.ratings = p.ratings || {};
+            ['physical', 'technical', 'mental', 'tactical'].forEach(k => {
+                if (!Array.isArray(p.ratings[k])) p.ratings[k] = [];
+            });
+            return p;
+        }
+
+        function updateAvailabilityTotal() {
+            const el = document.getElementById('availability-total');
+            if (!el) return;
+            const a = (getActivePlayer() || {}).availability || {};
+            const tot = ['available', 'injured', 'suspended', 'bench'].reduce((s, k) => s + Number(a[k] || 0), 0);
+            if (tot === 100) {
+                el.className = 'text-[11px] font-semibold mt-1.5 text-emerald-700';
+                el.textContent = 'Totale 100%';
+            } else {
+                el.className = 'text-[11px] font-semibold mt-1.5 text-crimson';
+                el.textContent = `Totale ${tot}%: le quattro voci dovrebbero sommare 100%`;
+            }
+        }
+
+        function duplicatePlayer(id) {
+            const src = players.find(p => p.id === id);
+            if (!src) return;
+            const copy = JSON.parse(JSON.stringify(src));
+            copy.id = 'player-' + Date.now();
+            copy.name = (src.name || 'Calciatore') + ' (copia)';
+            players.splice(players.indexOf(src) + 1, 0, copy);
+            savePlayersToStorage();
+            populateYearFilter();
+            renderArchive();
+            showToast('Scheda duplicata.', 'success');
+        }
+
         window.onload = function () {
             loadPlayersFromStorage();
             populateYearFilter();
@@ -1255,6 +1356,7 @@
                 const raw = localStorage.getItem(STORAGE_KEY);
                 if (raw) {
                     players = JSON.parse(raw);
+                    if (Array.isArray(players)) players = players.map(normalizePlayer);
                     if (!Array.isArray(players) || players.length === 0) {
                         players = JSON.parse(JSON.stringify(SEED_PLAYERS));
                         savePlayersToStorage();
@@ -1290,7 +1392,8 @@
             const bg = type === 'error' ? 'bg-crimson' : (type === 'success' ? 'bg-emerald-700' : 'bg-navy');
             const icon = type === 'error' ? 'fa-circle-exclamation' : (type === 'success' ? 'fa-circle-check' : 'fa-circle-info');
             toast.className = `${bg} text-white px-4 py-3 rounded-2xl shadow-xl text-xs sm:text-sm font-semibold flex items-center gap-2.5 pointer-events-auto transition-all duration-300 transform translate-y-0`;
-            toast.innerHTML = `<i class="fa-solid ${icon} text-base"></i><span>${message}</span>`;
+            toast.innerHTML = `<i class="fa-solid ${icon} text-base"></i><span></span>`;
+            toast.querySelector('span').textContent = message;
             container.appendChild(toast);
             setTimeout(() => {
                 toast.style.opacity = '0';
@@ -1441,6 +1544,15 @@
                 return matchText && matchRole && matchGrade && matchYear && matchContract;
             });
 
+            const sortKey = (document.getElementById('filter-sort') || {}).value || 'recent';
+            const gradeRank = g => { const i = GRADES_LIST.indexOf(g); return i === -1 ? 99 : i; };
+            const contractYear = c => { const m = String(c || '').match(/(\d{4})/); return m ? Number(m[1]) : 9999; };
+            if (sortKey === 'name') filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'it'));
+            else if (sortKey === 'grade') filtered.sort((a, b) => gradeRank(a.finalGrade) - gradeRank(b.finalGrade) || Number(calculateGlobalAverage(b)) - Number(calculateGlobalAverage(a)));
+            else if (sortKey === 'avg') filtered.sort((a, b) => Number(calculateGlobalAverage(b)) - Number(calculateGlobalAverage(a)));
+            else if (sortKey === 'age') filtered.sort((a, b) => (b.dob || '').localeCompare(a.dob || ''));
+            else if (sortKey === 'contract') filtered.sort((a, b) => contractYear(a.contract) - contractYear(b.contract));
+
             document.getElementById('archive-count-subtitle').textContent = `${filtered.length} di ${players.length} profili visualizzati`;
 
             const grid = document.getElementById('players-grid');
@@ -1467,15 +1579,15 @@
                         <div>
                             <div class="flex items-start justify-between gap-3 mb-3">
                                 <div class="flex items-center gap-3">
-                                    <img src="${p.photo || 'https://placehold.co/120x120/0F172A/FFFFFF?text=PLAYER'}" onerror="this.src='https://placehold.co/120x120/0F172A/FFFFFF?text=PLAYER'" alt="${p.name}" class="w-14 h-14 rounded-2xl object-cover border border-slate-200 bg-slate-100 flex-shrink-0">
+                                    <img src="${esc(p.photo || 'https://placehold.co/120x120/0F172A/FFFFFF?text=PLAYER')}" onerror="this.src='https://placehold.co/120x120/0F172A/FFFFFF?text=PLAYER'" alt="${esc(p.name)}" class="w-14 h-14 rounded-2xl object-cover border border-slate-200 bg-slate-100 flex-shrink-0">
                                     <div>
-                                        <span class="inline-block text-[10px] font-bold uppercase tracking-wider text-crimson mb-0.5">${p.roleCategory} • ${p.foot}</span>
-                                        <h3 class="font-extrabold text-base text-navy leading-tight">${p.name} ${p.number ? `<span class="text-slate-400 font-bold text-xs">#${p.number}</span>` : ''}</h3>
-                                        <p class="text-xs font-semibold text-slate-600">${p.club} <span class="text-slate-400">(${p.league || '-'})</span></p>
+                                        <span class="inline-block text-[10px] font-bold uppercase tracking-wider text-crimson mb-0.5">${esc(p.roleCategory)} • ${esc(p.foot)}</span>
+                                        <h3 class="font-extrabold text-base text-navy leading-tight">${esc(p.name)} ${p.number ? `<span class="text-slate-400 font-bold text-xs">#${esc(p.number)}</span>` : ''}</h3>
+                                        <p class="text-xs font-semibold text-slate-600">${esc(p.club)} <span class="text-slate-400">(${esc(p.league || '-')})</span></p>
                                     </div>
                                 </div>
                                 <div class="flex flex-col items-end">
-                                    <span class="${gradeBg} text-xs font-extrabold px-2.5 py-1 rounded-xl shadow-sm">${p.finalGrade}</span>
+                                    <span class="${gradeBg} text-xs font-extrabold px-2.5 py-1 rounded-xl shadow-sm">${esc(p.finalGrade)}</span>
                                     <span class="text-[10px] font-bold text-slate-400 mt-1">Media ${avg}</span>
                                 </div>
                             </div>
@@ -1487,11 +1599,11 @@
                                 </div>
                                 <div>
                                     <span class="text-[9px] font-bold uppercase text-slate-400 block">Scadenza</span>
-                                    <span class="text-xs font-extrabold text-navy">${p.contract || '-'}</span>
+                                    <span class="text-xs font-extrabold text-navy">${esc(p.contract || '-')}</span>
                                 </div>
                                 <div>
                                     <span class="text-[9px] font-bold uppercase text-slate-400 block">Valore</span>
-                                    <span class="text-xs font-extrabold text-crimson">${p.value || '-'}</span>
+                                    <span class="text-xs font-extrabold text-crimson">${esc(p.value || '-')}</span>
                                 </div>
                             </div>
                         </div>
@@ -1502,6 +1614,9 @@
                             </button>
                             <button onclick="openPlayer('${p.id}', 'export')" class="py-2.5 px-3.5 rounded-xl bg-crimson/10 text-crimson hover:bg-crimson hover:text-white text-xs font-extrabold active:scale-95 transition flex items-center justify-center gap-1.5" title="Esporta PDF">
                                 <i class="fa-solid fa-file-pdf"></i> PDF
+                            </button>
+                            <button onclick="duplicatePlayer('${p.id}')" class="py-2.5 px-3 rounded-xl bg-slate-100 text-slate-500 hover:text-navy active:scale-95 transition" title="Duplica">
+                                <i class="fa-solid fa-copy text-xs"></i>
                             </button>
                             <button onclick="deletePlayer('${p.id}')" class="py-2.5 px-3 rounded-xl bg-slate-100 text-slate-500 hover:text-crimson active:scale-95 transition" title="Elimina">
                                 <i class="fa-solid fa-trash-can text-xs"></i>
@@ -1542,7 +1657,7 @@
                 tacticalDescription: '',
                 pitchZones: { primary: ['CC_R'], secondary: [] },
                 career: [
-                    { season: '2025/2026', club: '', league: '', apps: 0, starts: 0, mins: 0, goals: 0, assists: 0, yellow: 0, red: 0 }
+                    { season: currentSeason(), club: '', league: '', apps: 0, starts: 0, mins: 0, goals: 0, assists: 0, yellow: 0, red: 0 }
                 ],
                 categoryDistribution: '',
                 careerNotes: '',
@@ -1627,16 +1742,31 @@
             reader.onload = function (e) {
                 try {
                     const imported = JSON.parse(e.target.result);
-                    if (Array.isArray(imported) && imported.length > 0) {
-                        players = imported;
-                        currentPlayerId = players[0].id;
-                        savePlayersToStorage();
-                        populateYearFilter();
-                        renderArchive();
-                        showToast(`Importati ${players.length} profili nel database!`, 'success');
-                    } else {
+                    if (!Array.isArray(imported) || imported.length === 0) {
                         showToast('File JSON non valido.', 'error');
+                        return;
                     }
+                    const valid = imported
+                        .filter(x => x && typeof x === 'object' && typeof x.name === 'string')
+                        .map(normalizePlayer);
+                    if (valid.length === 0) {
+                        showToast('Nessun profilo valido nel file.', 'error');
+                        return;
+                    }
+                    showConfirm('Ripristina backup',
+                        `Il file contiene ${valid.length} profili. Verranno aggiunti, oppure aggiornati se hanno lo stesso ID. Le altre schede già presenti non vengono cancellate. Procedere?`,
+                        () => {
+                            let added = 0, updated = 0;
+                            valid.forEach(v => {
+                                const i = players.findIndex(p => p.id === v.id);
+                                if (i >= 0) { players[i] = v; updated++; }
+                                else { players.push(v); added++; }
+                            });
+                            savePlayersToStorage();
+                            populateYearFilter();
+                            renderArchive();
+                            showToast(`Backup importato: ${added} nuovi, ${updated} aggiornati.`, 'success');
+                        });
                 } catch (err) {
                     showToast('Errore durante la lettura del file JSON.', 'error');
                 }
@@ -1838,10 +1968,10 @@
                     resultsDiv.innerHTML = soccerPlayers.slice(0, 4).map((sp, idx) => `
                         <div class="flex items-center justify-between bg-navy-light p-2.5 rounded-xl border border-white/10">
                             <div class="flex items-center gap-2.5">
-                                <img src="${sp.strCutout || sp.strThumb || 'https://placehold.co/80x80/0F172A/FFFFFF?text=WEB'}" class="w-10 h-10 rounded-lg object-cover bg-slate-800">
+                                <img src="${esc(sp.strCutout || sp.strThumb || 'https://placehold.co/80x80/0F172A/FFFFFF?text=WEB')}" class="w-10 h-10 rounded-lg object-cover bg-slate-800">
                                 <div>
-                                    <p class="text-xs font-bold text-white">${sp.strPlayer}</p>
-                                    <p class="text-[10px] text-slate-300">${sp.strTeam || 'Svincolato'} • ${sp.strPosition || ''} • ${sp.dateBorn || ''}</p>
+                                    <p class="text-xs font-bold text-white">${esc(sp.strPlayer)}</p>
+                                    <p class="text-[10px] text-slate-300">${esc(sp.strTeam || 'Svincolato')} • ${esc(sp.strPosition || '')} • ${esc(sp.dateBorn || '')}</p>
                                 </div>
                             </div>
                             <button onclick="applyOnlinePlayer(${idx})" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold">Importa</button>
@@ -1965,9 +2095,9 @@
 
                 return `
                     <tr>
-                        <td class="p-1.5"><input type="text" value="${r.season}" onchange="updateCareerCell(${idx}, 'season', this.value)" class="w-20 px-2 py-1.5 bg-surface border border-slate-200 rounded-lg font-bold text-navy"></td>
-                        <td class="p-1.5"><input type="text" value="${r.club}" onchange="updateCareerCell(${idx}, 'club', this.value)" class="w-32 px-2 py-1.5 bg-surface border border-slate-200 rounded-lg font-semibold text-navy"></td>
-                        <td class="p-1.5"><input type="text" value="${r.league}" onchange="updateCareerCell(${idx}, 'league', this.value)" class="w-24 px-2 py-1.5 bg-surface border border-slate-200 rounded-lg text-navy"></td>
+                        <td class="p-1.5"><input type="text" value="${esc(r.season)}" onchange="updateCareerCell(${idx}, 'season', this.value)" class="w-20 px-2 py-1.5 bg-surface border border-slate-200 rounded-lg font-bold text-navy"></td>
+                        <td class="p-1.5"><input type="text" value="${esc(r.club)}" onchange="updateCareerCell(${idx}, 'club', this.value)" class="w-32 px-2 py-1.5 bg-surface border border-slate-200 rounded-lg font-semibold text-navy"></td>
+                        <td class="p-1.5"><input type="text" value="${esc(r.league)}" onchange="updateCareerCell(${idx}, 'league', this.value)" class="w-24 px-2 py-1.5 bg-surface border border-slate-200 rounded-lg text-navy"></td>
                         <td class="p-1.5"><input type="number" value="${r.apps}" onchange="updateCareerCell(${idx}, 'apps', this.value)" class="w-12 px-1 py-1.5 bg-surface border border-slate-200 rounded-lg text-center font-bold"></td>
                         <td class="p-1.5"><input type="number" value="${r.starts}" onchange="updateCareerCell(${idx}, 'starts', this.value)" class="w-12 px-1 py-1.5 bg-surface border border-slate-200 rounded-lg text-center"></td>
                         <td class="p-1.5"><input type="number" value="${r.mins}" onchange="updateCareerCell(${idx}, 'mins', this.value)" class="w-16 px-1 py-1.5 bg-surface border border-slate-200 rounded-lg text-center"></td>
@@ -1998,7 +2128,7 @@
         function addCareerRow() {
             const p = getActivePlayer();
             if (!p.career) p.career = [];
-            p.career.unshift({ season: '2025/2026', club: p.club || '', league: p.league || '', apps: 0, starts: 0, mins: 0, goals: 0, assists: 0, yellow: 0, red: 0 });
+            p.career.unshift({ season: currentSeason(), club: p.club || '', league: p.league || '', apps: 0, starts: 0, mins: 0, goals: 0, assists: 0, yellow: 0, red: 0 });
             savePlayersToStorage();
             renderCareerTable();
         }
@@ -2031,6 +2161,11 @@
         }
 
         function renderAvailabilityBar() {
+            renderAvailabilityBarBase();
+            updateAvailabilityTotal();
+        }
+
+        function renderAvailabilityBarBase() {
             const p = getActivePlayer();
             const a = p.availability || { available: 90, injured: 5, suspended: 0, bench: 5 };
             document.getElementById('availability-progress-bar').innerHTML = `
@@ -2056,7 +2191,7 @@
                     <div class="grid grid-cols-12 gap-2">
                         <div class="col-span-7">
                             <label class="text-[9px] font-bold uppercase text-slate-400">Problema / Diagnosi</label>
-                            <input type="text" value="${inj.type}" onchange="updateInjuryCell(${idx}, 'type', this.value)" class="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-navy">
+                            <input type="text" value="${esc(inj.type)}" onchange="updateInjuryCell(${idx}, 'type', this.value)" class="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-navy">
                         </div>
                         <div class="col-span-5">
                             <label class="text-[9px] font-bold uppercase text-slate-400">Sede Anatomica</label>
@@ -2068,7 +2203,7 @@
                     <div class="grid grid-cols-4 gap-2 items-end">
                         <div>
                             <label class="text-[9px] font-bold uppercase text-slate-400">Data Stop</label>
-                            <input type="text" value="${inj.start}" placeholder="gg/mm/aaaa" onchange="updateInjuryCell(${idx}, 'start', this.value)" class="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs">
+                            <input type="text" value="${esc(inj.start)}" placeholder="gg/mm/aaaa" onchange="updateInjuryCell(${idx}, 'start', this.value)" class="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs">
                         </div>
                         <div>
                             <label class="text-[9px] font-bold uppercase text-slate-400">Giorni Rec.</label>
@@ -2089,7 +2224,7 @@
         function addInjuryRow() {
             const p = getActivePlayer();
             if (!p.injuries) p.injuries = [];
-            p.injuries.unshift({ type: 'Affaticamento Muscolare', bodyPart: 'thigh_r', bodyLabel: 'Coscia / Adduttore Destro', contact: 'No Contatto', start: '01/02/2026', end: '12/02/2026', days: 11, missed: 1 });
+            p.injuries.unshift({ type: 'Nuovo infortunio', bodyPart: 'thigh_r', bodyLabel: 'Coscia / Adduttore Destro', contact: 'No Contatto', start: todayIT(), end: '', days: 0, missed: 0 });
             savePlayersToStorage();
             renderInjuriesList();
             renderAnatomicalMap();
@@ -2220,11 +2355,11 @@
             container.innerHTML = items.map((item, idx) => `
                 <div class="p-3.5 bg-surface rounded-2xl border border-slate-200/80 space-y-2.5">
                     <div class="flex items-center justify-between gap-2">
-                        <span class="font-bold text-xs sm:text-sm text-navy">${item.name}</span>
+                        <span class="font-bold text-xs sm:text-sm text-navy">${esc(item.name)}</span>
                         <span id="slider-val-${idx}" class="px-2.5 py-1 rounded-lg bg-navy text-white font-extrabold text-xs min-w-[46px] text-center">${Number(item.score).toFixed(1)}</span>
                     </div>
                     <input type="range" min="1" max="10" step="0.5" value="${item.score}" oninput="onRatingSliderChange(${idx}, this.value)" class="scout-slider">
-                    <input type="text" value="${item.note || ''}" placeholder="Nota osservatore su ${item.name.toLowerCase()}..." oninput="onRatingNoteChange(${idx}, this.value)" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-navy focus:border-crimson focus:outline-none">
+                    <input type="text" value="${esc(item.note || '')}" placeholder="Nota osservatore su ${esc(item.name.toLowerCase())}..." oninput="onRatingNoteChange(${idx}, this.value)" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-navy focus:border-crimson focus:outline-none">
                 </div>
             `).join('');
         }
@@ -2325,7 +2460,7 @@
             }).join('');
 
             return `
-                <svg viewBox="0 0 240 230" class="w-full h-auto">
+                <svg viewBox="-25 0 290 230" class="w-full h-auto">
                     ${webs}
                     ${spokes}
                     <polygon points="${dataPts}" fill="rgba(139, 30, 36, 0.25)" stroke="#8B1E24" stroke-width="2" />
@@ -2350,8 +2485,8 @@
             }
             container.innerHTML = list.map((m, idx) => `
                 <div class="flex items-center gap-1.5 bg-surface p-2 rounded-xl border border-slate-200">
-                    <input type="text" value="${m.label}" placeholder="Metrica" onchange="updateMetricCell(${idx}, 'label', this.value)" class="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold">
-                    <input type="text" value="${m.value}" placeholder="Val." onchange="updateMetricCell(${idx}, 'value', this.value)" class="w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center text-crimson">
+                    <input type="text" value="${esc(m.label)}" placeholder="Metrica" onchange="updateMetricCell(${idx}, 'label', this.value)" class="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold">
+                    <input type="text" value="${esc(m.value)}" placeholder="Val." onchange="updateMetricCell(${idx}, 'value', this.value)" class="w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center text-crimson">
                     <input type="number" min="0" max="100" value="${m.percentile}" placeholder="%" onchange="updateMetricCell(${idx}, 'percentile', this.value)" class="w-14 px-1.5 py-1 bg-white border border-slate-200 rounded-lg text-xs text-center">
                     <button onclick="removeMetricRow(${idx})" class="text-slate-400 hover:text-crimson px-1"><i class="fa-solid fa-xmark"></i></button>
                 </div>
@@ -2386,7 +2521,7 @@
             const container = document.getElementById(`${type}-list`);
             container.innerHTML = arr.map((txt, idx) => `
                 <div class="flex items-center gap-1.5">
-                    <input type="text" value="${txt.replace(/"/g, '&quot;')}" onchange="updateBulletItem('${type}', ${idx}, this.value)" class="flex-1 px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs text-navy focus:border-crimson focus:outline-none">
+                    <input type="text" value="${esc(txt)}" onchange="updateBulletItem('${type}', ${idx}, this.value)" class="flex-1 px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs text-navy focus:border-crimson focus:outline-none">
                     <button onclick="removeBulletItem('${type}', ${idx})" class="text-slate-400 hover:text-crimson p-1.5"><i class="fa-solid fa-trash-can text-xs"></i></button>
                 </div>
             `).join('');
@@ -2461,9 +2596,11 @@
             if (!isoDate) return '';
             const dob = new Date(isoDate);
             if (isNaN(dob.getTime())) return '';
-            const diff = Date.now() - dob.getTime();
-            const ageDate = new Date(diff);
-            return Math.abs(ageDate.getUTCFullYear() - 1970);
+            const now = new Date();
+            let age = now.getFullYear() - dob.getUTCFullYear();
+            const m = now.getMonth() - dob.getUTCMonth();
+            if (m < 0 || (m === 0 && now.getDate() < dob.getUTCDate())) age--;
+            return age;
         }
 
         function getPdfHeaderHtml(player, sectionTitle) {
@@ -2524,7 +2661,8 @@
             document.getElementById('export-player-title').textContent = p.name;
 
             const container = document.getElementById('pdf-preview-container');
-            const html = pdfTemplate === 'executive' ? buildExecutivePdfHtml(p) : buildDossierPdfHtml(p);
+            const safe = escapeDeep(p);
+            const html = pdfTemplate === 'executive' ? buildExecutivePdfHtml(safe) : buildDossierPdfHtml(safe);
             container.innerHTML = html;
             document.getElementById('print-area').innerHTML = html;
         }
@@ -2533,8 +2671,9 @@
         function buildExecutivePdfHtml(p) {
             const age = calculateAge(p.dob);
             const careerRows = (p.career || []).slice(0, 6);
+            const careerAll = p.career || [];
             let totApps = 0, totStarts = 0, totMins = 0, totGoals = 0, totAssists = 0, totYellow = 0, totRed = 0;
-            careerRows.forEach(r => {
+            careerAll.forEach(r => {
                 totApps += Number(r.apps || 0); totStarts += Number(r.starts || 0); totMins += Number(r.mins || 0);
                 totGoals += Number(r.goals || 0); totAssists += Number(r.assists || 0); totYellow += Number(r.yellow || 0); totRed += Number(r.red || 0);
             });
@@ -2623,7 +2762,7 @@
                                     </tr>
                                 `).join('')}
                                 <tr style="background: #F1F5F9; font-weight: 800; text-align: center;">
-                                    <td colspan="3" style="padding: 4.5px; text-align: left;">TOTALE STORICO</td>
+                                    <td colspan="3" style="padding: 4.5px; text-align: left;">TOTALE CARRIERA${careerAll.length > careerRows.length ? ' (tutte le stagioni)' : ''}</td>
                                     <td style="padding: 4.5px;">${totApps}</td>
                                     <td style="padding: 4.5px;">${totStarts}</td>
                                     <td style="padding: 4.5px;">${totMins.toLocaleString('it-IT')}'</td>
@@ -2799,7 +2938,7 @@
                     </div>
 
                     <div style="border-top: 1px solid rgba(255,255,255,0.15); padding-top: 14px; font-size: 10px; color: #94A3B8;">
-                        <div>Data Report: ${new Date().toLocaleDateString('it-IT')} • Stagione 2025/2026</div>
+                        <div>Data Report: ${new Date().toLocaleDateString('it-IT')} • Stagione ${currentSeason()}</div>
                         <div style="margin-top: 4px; font-weight: 700; color: #FFFFFF;">SCOUTING DEPARTMENT — CONFIDENTIAL</div>
                     </div>
                 </div>
@@ -3070,6 +3209,11 @@
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fa-solid fa-download"></i><span>Scarica PDF</span>';
             }
+        }
+    </script>
+    <script>
+        if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
         }
     </script>
 </body>

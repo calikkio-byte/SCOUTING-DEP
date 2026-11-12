@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0F172A"/>
+  <path d="M256 96l128 48v96c0 88-52 140-128 176-76-36-128-88-128-176v-96z" fill="#8B1E24" stroke="#FFFFFF" stroke-width="12" stroke-linejoin="round"/>
+  <text x="256" y="292" text-anchor="middle" font-family="Montserrat, Arial, sans-serif" font-weight="800" font-size="120" fill="#FFFFFF">SD</text>
+</svg>

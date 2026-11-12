@@ -1,0 +1,15 @@
+{
+  "name": "Scouting Department",
+  "short_name": "Scouting",
+  "description": "Player report e database di scouting calcistico",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0F172A",
+  "theme_color": "#0F172A",
+  "lang": "it",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
